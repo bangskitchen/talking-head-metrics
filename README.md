@@ -1,11 +1,9 @@
-# Video_quality_metrics
+# talking-head-metrics
+1. PNSR, SSIM, LPIPS, CPBD, FID
+2. SyncNet, F-LMD, M-LMD (To be uploaded)
 
-- PSNR, SSIM, LPIPS, CPBD, FID
-- SyncNet
-- F-LMD, M-LMD
-
-requirement
-- python3.8
+## Requirements
+- python 3.8
 - numpy==1.24.4
 - opencv-python
 - torch
@@ -17,5 +15,6 @@ requirement
 - ffmpeg
 
 when install cpbd lib, you have to fix compute.py
+---
 from scipy import ndimage -> from skimage.io import imread
 
