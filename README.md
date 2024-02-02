@@ -15,3 +15,7 @@ requirement
 - cpbd==1.0.7
 - pytorch_fid_wrapper==0.0.4
 - ffmpeg
+
+when install cpbd lib, you have to fix compute.py
+from scipy import ndimage -> from skimage.io import imread
+
