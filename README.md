@@ -1,9 +1,10 @@
 # talking-head-metrics
 1. PNSR, SSIM, LPIPS, CPBD, FID
-2. SyncNet, F-LMD, M-LMD (To be uploaded)
+2. [SyncNet](https://github.com/joonson/syncnet_python)
+3. F-LMD, M-LMD
 
 ## Requirements
-- python 3.8
+- python >= 3.8
 - numpy==1.24.4
 - opencv-python
 - torch
