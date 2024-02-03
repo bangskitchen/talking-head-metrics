@@ -18,7 +18,10 @@
 - pytorch_fid_wrapper==0.0.4
 - ffmpeg
 
-when install cpbd lib, you have to fix compute.py
 ---
-from scipy import ndimage -> from skimage.io import imread
-
+When install cpbd lib, you have to fix %home%/anaconda3/envs/%env_name%/lib/python3.8/site-packages/cpbd/compute.py
+```
+ImportError: cannot import name 'imread' from 'scipy.ndimage' (%home%/anaconda3/envs/%env_name%/lib/python3.8/site-packages/scipy/ndimage/__init__.py)
+14 from scipy.ndimage import imread
+-> from skimage.io import imread
+```
