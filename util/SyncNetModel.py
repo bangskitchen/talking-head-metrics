@@ -83,17 +83,17 @@ class S(nn.Module):
 
     def forward_aud(self, x):
         mid = self.netcnnaud(x)
-        mid = mid.view((mid.size()[0], -1))
+        mid = mid.reshape((mid.size()[0], -1))
         out = self.netfcaud(mid)
         return out
 
     def forward_lip(self, x):
         mid = self.netcnnlip(x); 
-        mid = mid.view((mid.size()[0], -1))
+        mid = mid.reshape((mid.size()[0], -1))
         out = self.netfclip(mid)
         return out
 
     def forward_lipfeat(self, x):
         mid = self.netcnnlip(x)
-        out = mid.view((mid.size()[0], -1))
+        out = mid.reshape((mid.size()[0], -1))
         return out

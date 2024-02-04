@@ -1,4 +1,3 @@
-import os, sys
 import argparse
 
 from PIL import Image
@@ -16,11 +15,38 @@ import lpips
 import pytorch_fid_wrapper as pyfid
 
 # SyncNet
-import time
-from scipy import signal
+from torchvision.transforms import functional as trans_fn
+from torchvision.transforms.functional import InterpolationMode
 from scipy.io import wavfile
 import python_speech_features
-from SyncNetModel import *
+from util.SyncNetModel import *
+
+# LMD code by SadTalker
+from util.extract_kp_videos_safe import KeypointExtractor
+
+
+def get_frames(video_path, res=256):
+    frames_numpy, frames_torch = list(), list()
+
+    # read video
+    cap = cv2.VideoCapture(video_path)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
+
+        if (res != 256):
+            PIL_image = convert_numpy_to_PIL([frame])[0]
+            img = trans_fn.resize(PIL_image, 224, interpolation=InterpolationMode.LANCZOS)
+            img = trans_fn.center_crop(img, 224)
+            frame = convert_PIL_to_numpy([img])[0]
+
+        frames_numpy.append(frame)
+        R, G, B = cv2.split(frame)
+        frame = cv2.merge([B, G, R]).astype(np.float32) / 255.
+        frame = torch.from_numpy(frame).permute(2, 0, 1) * 2 - 1
+        frames_torch.append(frame)
+
+    return np.array(frames_numpy), torch.stack(frames_torch)
 
 def psnr_score(real_images: np.ndarray, fake_images: np.ndarray):
     score = [peak_signal_noise_ratio(real_images[i], fake_images[i], data_range=255) for i in range(len(real_images))]
@@ -45,17 +71,19 @@ def cpbd_score(images: np.ndarray):
     score = [cpbd.compute(np.array(image)) for image in PIL_gray_images]
     return sum(score) / len(score)
 
-def calc_pdist(feat1, feat2, vshift=10):
-    win_size = vshift * 2 + 1
-    feat2p = torch.nn.functional.pad(feat2, (0, 0, vshift, vshift))
-    dists = []
 
-    for i in range(0, len(feat1)):
-        dists.append(torch.nn.functional.pairwise_distance(feat1[[i], :].repeat(win_size, 1), feat2p[i:i + win_size, :]))
-
-    return dists
-
+# it needs ffmpeg offset control.
 def syncnet_score(video_path, audio_path, fps=25):
+    def calc_pdist(feat1, feat2, vshift=10):
+        win_size = vshift * 2 + 1
+        feat2p = torch.nn.functional.pad(feat2, (0, 0, vshift, vshift))
+        dists = []
+
+        for i in range(0, len(feat1)):
+            dists.append(torch.nn.functional.pairwise_distance(feat1[[i], :].repeat(win_size, 1), feat2p[i:i + win_size, :]))
+
+        return dists
+    
     # parameters
     batch_size = 20
     vshift = 15
@@ -69,7 +97,7 @@ def syncnet_score(video_path, audio_path, fps=25):
     __S__.eval()
 
     # load video
-    frames, _ = get_frames(video_path)
+    frames, _ = get_frames(video_path, res=224)
     im = np.expand_dims(frames, axis=0)
     im = np.transpose(im, (0, 4, 1, 2, 3))
     imtv = torch.autograd.Variable(torch.from_numpy(im.astype(float)).float())
@@ -89,15 +117,13 @@ def syncnet_score(video_path, audio_path, fps=25):
     cct = torch.autograd.Variable(torch.from_numpy(cc.astype(float)).float())
 
     # calculate
-    lastframe = min_length - 5
+    lastframe = (min_length // 640) - 5
     im_feat = []
     cc_feat = []
 
-    tS = time.time()
     for i in range(0, lastframe, batch_size):
-        
         im_batch = [imtv[:, :, vframe:vframe + 5, :, :] for vframe in range(i, min(lastframe, i + batch_size))]
-        im_in = torch.cat(im_batch,0)
+        im_in = torch.cat(im_batch, 0)
         im_out  = __S__.forward_lip(im_in.cuda())
         im_feat.append(im_out.data.cpu())
 
@@ -108,8 +134,6 @@ def syncnet_score(video_path, audio_path, fps=25):
 
     im_feat = torch.cat(im_feat, 0)
     cc_feat = torch.cat(cc_feat, 0)
-        
-    print('Compute time %.3f sec.' % (time.time() - tS))
 
     dists = calc_pdist(im_feat, cc_feat, vshift=vshift)
     mdist = torch.mean(torch.stack(dists, 1), 1)
@@ -119,38 +143,38 @@ def syncnet_score(video_path, audio_path, fps=25):
     offset = vshift - minidx
     conf   = torch.median(mdist) - minval
 
-    fdist   = np.stack([dist[minidx].numpy() for dist in dists])
-    fconf   = torch.median(mdist).numpy() - fdist
-    fconfm  = signal.medfilt(fconf, kernel_size=9)
-
-    np.set_printoptions(formatter={'float': '{: 0.3f}'.format})
-    print('Framewise conf: ')
-    print(fconfm)
-    print('AV offset: \t%d \nMin dist: \t%.3f\nConfidence: \t%.3f' % (offset,minval,conf))
-
     dists_npy = np.array([ dist.numpy() for dist in dists ])
-    return offset.numpy(), conf.numpy(), dists_npy
+    return offset, minval, conf, dists_npy
 
-def lmd_score():
-    ...
+def lmd_score(real_video_path, fake_video_path):
+    real_frames, _ = get_frames(real_video_path)
+    fake_frames, _ = get_frames(fake_video_path)
 
+    device = torch.device(0)
+    torch.cuda.set_device(device)
+    preprocesser = KeypointExtractor(device)
 
-def get_frames(video_path):
-    frames_numpy, frames_torch = list()
+    real_lm = preprocesser.extract_keypoint(list(real_frames))
+    fake_lm = preprocesser.extract_keypoint(list(fake_frames))
 
-    # read video
-    cap = cv2.VideoCapture(video_path)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret: break
+    FLMD_score = 0
+    MLMD_score = 0
+    T, P, _  = real_lm.shape  
+    for i in range(T):
+        for j in range(P):
+            FLMD_score += torch.norm(torch.tensor(real_lm[i, j, :] - fake_lm[i, j, :]))
 
-        frames_numpy.append(frame)
-        R, G, B = cv2.split(frame)
-        frame = cv2.merge([B, G, R]).astype(np.float32) / 255.
-        frame = torch.from_numpy(frame).permute(2, 0, 1) * 2 - 1
-        frames_torch.append(frame)
+            if (j >= 48):
+                MLMD_score += torch.norm(torch.tensor(real_lm[i, j, :] - fake_lm[i, j, :]))
+    
+    return FLMD_score / (T * P), MLMD_score / (T * P)
 
-    return np.array(frames_numpy), torch.stack(frames_torch)
+def convert_PIL_to_numpy(images):
+    return np.array([cv2.merge(list(cv2.split(np.uint8(image))[::-1])) for image in images])
+
+def convert_numpy_to_PIL(images):
+    return [Image.fromarray(cv2.merge(list(cv2.split(image)[::-1]))) for image in images]
+
 
 if __name__ == "__main__":
     print("main:", __file__)
@@ -171,3 +195,5 @@ if __name__ == "__main__":
     print("SSIM:", ssim_score(real_frames_numpy, fake_frames_numpy))
     print("LPIPS:", lpips_score(real_frames_torch, fake_frames_torch, device=device))
     print("FID:", fid_score(real_frames_torch, fake_frames_torch, device=device))
+    print("real CPBD:", cpbd_score(real_frames_numpy))
+    print("fake CPBD:", cpbd_score(fake_frames_numpy))
