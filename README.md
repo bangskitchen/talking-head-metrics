@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # talking-head-metrics
 1. PNSR, SSIM, LPIPS, CPBD, FID
 2. [SyncNet](https://github.com/joonson/syncnet_python)
@@ -27,6 +26,3 @@ ImportError: cannot import name 'imread' from 'scipy.ndimage' (%home%/anaconda3/
 14 from scipy.ndimage import imread
 -> from skimage.io import imread
 ```
-=======
-# talking-head-metrics
->>>>>>> 77406242ec0d0e982b70ff9a7031597be47072ac
